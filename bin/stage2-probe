@@ -25,7 +25,14 @@ hosts="$OUT/hosts.txt"
 
 # Re-filter inputs through the Scope Guard (defense in depth) before any request.
 scoped="$OUT/hosts.scoped"; bb_require_scope_pass "$PROGRAM" < "$hosts" > "$scoped"
-bb_log probe "Probing $(wc -l < "$scoped" | tr -d ' ') in-scope hosts at <= $RPS rps (dry_run=$BB_DRY_RUN)."
+COUNT="$(wc -l < "$scoped" | tr -d ' ')"
+
+# Typed human confirmation (G2) on top of the code gate — only for real traffic.
+if [[ "$BB_DRY_RUN" != "1" ]]; then
+  bb_confirm_g2 "$PROGRAM" "$COUNT" "$RPS" || exit 4
+fi
+
+bb_log probe "Probing $COUNT in-scope hosts at <= $RPS rps (dry_run=$BB_DRY_RUN)."
 
 out="$OUT/probed.jsonl"
 bb_dry_or "$BB_ROOT/tests/fixtures/httpx.jsonl" -- \

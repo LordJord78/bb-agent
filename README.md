@@ -16,8 +16,13 @@ is below.
 2. **G2 — active testing.** Anything that sends crafted/HTTP requests to the
    target (httpx probe, crawl, port scan, nuclei) requires both
    `active_testing_allowed: true` in the program's scope **and** your explicit
-   per-run "yes". Passive enumeration (cert transparency, passive sources, DNS
-   resolution) does not.
+   per-run "yes". That "yes" is a typed confirmation: the stage echoes the plan
+   (program, number of in-scope targets, `rate_limit_rps`) and you must type the
+   exact program name at the prompt to proceed — anything else aborts with no
+   traffic. It is read from the terminal (`/dev/tty`), so no env var, flag, or
+   piped stdin can pre-satisfy it, and it only triggers at `BB_DRY_RUN=0`.
+   Passive enumeration (cert transparency, passive sources, DNS resolution)
+   does not need G2.
 3. **G3 — submission.** The agent writes report drafts to `reports/` and stops.
    Submitting a report is 100% manual, done by you.
 

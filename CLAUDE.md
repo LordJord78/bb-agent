@@ -18,6 +18,9 @@ code, not just docs.
    - **G1 (scope):** print parsed scope; the operator confirms before any network call.
    - **G2 (active testing):** nuclei/naabu/katana/anything sending crafted
      requests needs an explicit per-run "yes" AND `active_testing_allowed: true`.
+     The "yes" is a typed confirmation read from /dev/tty (the operator types the
+     exact program name after the stage echoes the plan); it cannot be satisfied
+     by an env var, flag, or piped stdin, and only triggers at BB_DRY_RUN=0.
      Passive recon (crt.sh, passive subfinder) may run without G2.
    - **G3 (submission):** NEVER submit anywhere. Write drafts to `reports/` and stop.
 

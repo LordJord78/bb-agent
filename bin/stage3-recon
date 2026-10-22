@@ -23,9 +23,17 @@ alive="$OUT/alive.txt"
 hosts="$OUT/hosts.txt"
 [[ -s "$alive" ]] || { bb_log recon "No alive URLs yet; run stage 2 first."; exit 1; }
 
-# Crawl only in-scope alive URLs (URL-preserving filter), then keep only the
-# crawled endpoints whose host is in scope — full URLs, paths intact.
+# Build the in-scope inputs first (URL-preserving for crawl, hosts for ports) so
+# the G2 prompt can state exactly what will be touched.
 scoped_urls="$OUT/alive.scoped"; bb_require_scope_pass_urls "$PROGRAM" < "$alive" > "$scoped_urls"
+scoped_hosts="$OUT/hosts.scoped"; bb_require_scope_pass "$PROGRAM" < "$hosts" > "$scoped_hosts"
+COUNT=$(( $(wc -l < "$scoped_urls" | tr -d ' ') + $(wc -l < "$scoped_hosts" | tr -d ' ') ))
+
+# Typed human confirmation (G2) on top of the code gate — only for real traffic.
+if [[ "$BB_DRY_RUN" != "1" ]]; then
+  bb_confirm_g2 "$PROGRAM" "$COUNT" "$RPS" || exit 4
+fi
+
 bb_log recon "Crawling $(wc -l < "$scoped_urls" | tr -d ' ') URLs at <= $RPS rps (dry_run=$BB_DRY_RUN)."
 endpoints="$OUT/endpoints.txt"
 bb_dry_or "$BB_ROOT/tests/fixtures/katana-endpoints.txt" -- \
@@ -33,7 +41,6 @@ bb_dry_or "$BB_ROOT/tests/fixtures/katana-endpoints.txt" -- \
   | bb_require_scope_pass_urls "$PROGRAM" | bb_anew "$endpoints" >/dev/null || true
 
 # Top-ports on in-scope hosts, rate limited.
-scoped_hosts="$OUT/hosts.scoped"; bb_require_scope_pass "$PROGRAM" < "$hosts" > "$scoped_hosts"
 ports="$OUT/ports.txt"
 bb_dry_or "$BB_ROOT/tests/fixtures/naabu-ports.txt" -- \
   naabu -silent -top-ports 100 -rate "$RPS" -list "$scoped_hosts" \

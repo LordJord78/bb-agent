@@ -134,3 +134,36 @@ except ScopeRefusal as exc:
     sys.exit(3)
 PY
 }
+
+# Interactive G2 gate: echo the plan, then require the operator to TYPE the exact
+# program name on the controlling terminal to proceed. This sits ON TOP of the
+# active_testing_allowed code gate and BB_DRY_RUN — it does not replace them.
+#
+# It reads from /dev/tty, never stdin, and honors NO env var or flag, so it
+# cannot be pre-satisfied by a pipe, BB_YES, or similar. If there is no readable
+# tty (non-interactive), it fails closed (aborts). Dry-run must not call this.
+#   usage: bb_confirm_g2 <program> <target_count> <rate_limit_rps>
+bb_confirm_g2() {
+  local program="$1" count="$2" rps="$3" answer=""
+  {
+    echo ""
+    echo "  == GATE G2 — confirm ACTIVE testing ============================"
+    echo "    Program:                $program"
+    echo "    In-scope targets to hit: $count"
+    echo "    Rate limit:             $rps req/s"
+    echo "    Active tools will send REAL requests to these targets."
+    echo "    Type the program name exactly to proceed; anything else aborts."
+    printf "    > "
+  } >&2
+  if [[ -r /dev/tty ]]; then
+    IFS= read -r answer </dev/tty || answer=""
+  else
+    answer=""
+  fi
+  if [[ -n "$answer" && "$answer" == "$program" ]]; then
+    bb_log "${BB_STAGE:-g2}" "G2 confirmed by operator for '$program'."
+    return 0
+  fi
+  bb_log "${BB_STAGE:-g2}" "G2 NOT confirmed (typed '${answer}') — aborting, no traffic sent."
+  return 1
+}

@@ -22,7 +22,7 @@ export BB_DRY_RUN ?= 1
 .PHONY: test init passive probe recon munge rank analyze report dry-run
 
 test:
-	@for t in scope_guard munge rank analyze report; do $(PY) tests/test_$$t.py || exit 1; echo; done
+	@for t in scope_guard munge rank analyze report g2_confirm; do $(PY) tests/test_$$t.py || exit 1; echo; done
 
 init:    ; @bin/stage0-init $(P)
 passive: ; @bin/stage1-passive $(P)
