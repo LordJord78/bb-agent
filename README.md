@@ -1,61 +1,112 @@
 # bb-agent
 
-A **semi-autonomous bug-bounty recon & triage assistant for AUTHORIZED testing
-only.** You point it only at programs you are enrolled in, using scope you paste
-yourself. It is draft-only and read-mostly: it enumerates, probes (within the
-rules you give it), triages, and drafts reports for your review. **It never
-submits anything.**
+A semi-autonomous bug-bounty **recon & triage assistant for AUTHORIZED testing only** —
+a **scout, not a soldier**. It enumerates hosts, probes them within the rules you give it,
+sorts the noise, and drafts reports. Every step that could touch someone else's systems is
+human-gated, and **it never submits anything**: you confirm scope, you approve active
+traffic, and you reproduce and file findings yourself. Point it only at programs you are
+enrolled in, with scope you paste yourself.
 
-`CLAUDE.md` holds the full guardrail contract; this is the operator runbook.
+New here? The operator field reference is **[OPS-CARD.md](OPS-CARD.md)**. This file is the
+reviewer/engineering entry point.
 
 ---
 
-## Runbook — a real program, in the safe order
+## Safety model (read this first)
 
-Do these in order. Nothing touches the network until step 3, and you expand one
-stage at a time.
+**The fence.** A program's rules of engagement say what you may touch. You write that into
+`targets/<program>/scope.yaml` — the fence. Every host is checked against it before any
+tool sees it (`lib/scope_guard.py`). `out_of_scope` always beats `in_scope`; wildcards
+cover strict subdomains only (the apex must be listed, unless a per-program
+`wildcard_includes_apex: true`); unknown hosts are rejected. If `automation_allowed: false`,
+the pipeline refuses every active stage. Fail-closed: missing permission flags default to
+the safe value. **When unsure, draw the fence smaller.**
 
-**1. Write the scope.** Create `targets/<program>/scope.yaml` (copy
-`targets/example-program/scope.yaml`) and fill every field from the program's
-rules-of-engagement page — see [the field map](#reading-a-roe-page-into-scopeyaml).
+**The three gates.**
+- **G1 — confirm scope.** `make init` prints the parsed fence and stops; you verify it
+  before any network call. *Catch scope mistakes while it's still just a file.*
+- **G2 — approve active testing.** Any stage that sends real requests requires
+  `active_testing_allowed: true` **and** a typed confirmation: it echoes the plan (program,
+  in-scope target count, rate), and you must type the exact program name at a prompt read
+  from `/dev/tty`. No env var, flag, or piped stdin can satisfy it; it only fires at
+  `BB_DRY_RUN=0`. *Sending traffic to someone else's systems should take a deliberate,
+  un-scriptable human act.*
+- **G3 — never submit.** Stage 6 writes a draft stamped `[HUMAN REVIEW REQUIRED]` / NOT
+  SUBMITTED and stops. *A human owns every word that gets filed.*
 
-**2. Confirm scope (gate G1).**
+**Switches.** `BB_DRY_RUN=1` is the **default** — every network tool is stubbed, nothing is
+contacted; a real run sets `BB_DRY_RUN=0` explicitly, per program, after G1/G2.
+`BB_HALT=1` is the kill switch — every stage aborts (exit 42). Active tools are rate-limited
+to the program's `rate_limit_rps` with jitter and an identifying User-Agent.
+
+---
+
+## What to review first
+
+The security-critical surface, in priority order:
+
+1. **`lib/scope_guard.py`** + **`tests/test_scope_guard.py`** — the fence. Confirm
+   `out_of_scope` beats `in_scope`, `automation_allowed: false` hard-refuses, wildcards
+   don't silently include the apex, and lookalikes (`evil-example.com`) are rejected.
+2. **G2 typed confirmation** — `bb_confirm_g2` in **`lib/common.sh`**, enforced in
+   **`bin/stage2-probe`** / **`bin/stage3-recon`**, proven through a real pty in
+   **`tests/test_g2_confirm.py`** (wrong/empty answer aborts with no traffic; exact name
+   proceeds). Check it reads `/dev/tty`, not stdin, and honors no bypass.
+3. **`.gitignore`** — why `recon/ findings/ reports/ logs/` are excluded: enumerated hosts,
+   drafts, and logs for a real program must never be committed (only `.gitkeep` is tracked).
+4. **G3 draft-only path** — **`lib/report.py`** / **`bin/stage6-report`**: drafts for
+   confirmed candidates only, each with the banner and the NOT-SUBMITTED footer; it writes
+   files and stops. Nothing anywhere submits.
+
+---
+
+## File map
+
+| path | what it is |
+|---|---|
+| `lib/scope_guard.py` | **The fence.** Host/URL matching + the RoE gates. Security-critical. |
+| `lib/common.sh` | Shared stage helpers: `BB_HALT`, logging, rate-limit/jitter, scope-filter bridge, and `bb_confirm_g2` (the G2 prompt). |
+| `lib/munge.py` | Stage 4a — deterministic normalize/dedupe/threshold/group (no model). |
+| `lib/rank.py` | Stage 4b — fuzzy ranking; schema-validated + one retry, deterministic fallback. |
+| `lib/analyze.py` | Stage 5 — exploitability analysis; flags out-of-policy proof; same validate/retry/fallback. |
+| `lib/report.py` | Stage 6 — renders drafts (banner + AI-disclosure); G3 stop. |
+| `bin/stage0-init` | Stage 0 — validate scope, print it back (G1). |
+| `bin/stage1-passive` | Stage 1 — passive enum + resolve. No active traffic. |
+| `bin/stage2-probe` | Stage 2 — httpx probe. Active: G2 + `active_testing_allowed`. |
+| `bin/stage3-recon` | Stage 3 — katana crawl + naabu ports. Active: G2 + `active_testing_allowed`. |
+| `bin/stage4b-rank` · `bin/stage5-analyze` · `bin/stage6-report` | Stage wrappers for 4b / 5 / 6. |
+| `bin/gate-check` | Does a program's RoE allow active testing? (reads scope; touches nothing). |
+| `bin/llm` | Inference backend dispatcher (`BB_INFERENCE_BACKEND`, default `claude`; never auto-pulls a model). |
+| `bin/tools.lock` | Pinned versions of the installed ProjectDiscovery toolchain. |
+| `Makefile` | Orchestrates every stage, `test`, and `dry-run`. |
+| `tests/` | 29 tests — scope guard, munge, rank, analyze, report, and the pty G2 test (+ fixtures). |
+| `CLAUDE.md` | Full guardrail contract for any future Claude Code session in this repo. |
+| `targets/example-program/scope.yaml` | Placeholder scope (example.com only — no real data). |
+| `OPS-CARD.md` | Operator field reference. |
+
+---
+
+## How to run
+
+Prove it offline first:
 ```bash
-make init P=<program>        # prints the parsed scope; no network
-```
-Read it back. If anything is wrong, fix the YAML and re-run. Nothing has been
-contacted. Optionally `bin/gate-check <program>` to see whether the RoE permits
-active testing at all.
-
-**3. Passive recon first** (no active traffic, no G2):
-```bash
-BB_DRY_RUN=0 make passive P=<program>
-# review recon/<program>/hosts.txt — these are the in-scope hosts kept
+make test        # 29 tests: scope guard, munge, rank, analyze, report, pty G2
+make dry-run     # walks stages 0-6 on example.com with every network tool stubbed
 ```
 
-**4. Then active probing — one stage at a time.** Each active stage echoes the
-plan and makes you **type the exact program name** to proceed (gate G2):
-```bash
-BB_DRY_RUN=0 make probe P=<program>   # stage 2: httpx (title/tech/status)
-# review recon/<program>/probed.jsonl and alive.txt, then:
-BB_DRY_RUN=0 make recon P=<program>   # stage 3: crawl + top-ports
-```
-Do **not** un-stub all stages at once. Watch G1 and the G2 prompt actually fire
-before enabling the next stage. Stages are idempotent and use `anew`, so re-runs
-surface only newly-seen items.
+**The daily loop** (a real program — nothing touches the network until step 3):
+1. Pick a program you're enrolled in; read its policy (RoE).
+2. Fill `targets/<program>/scope.yaml` to match the policy exactly
+   (see [the field map](#reading-a-roe-page-into-scopeyaml) below).
+3. `make init P=<program>` → verify the **G1** scope print-back.
+4. `BB_DRY_RUN=0 make passive P=<program>` → review `recon/<program>/hosts.txt`.
+5. `BB_DRY_RUN=0 make probe P=<program>` (type the name at **G2**), then
+   `BB_DRY_RUN=0 make recon P=<program>` — one stage at a time.
+6. `make rank`, `make analyze`, `make report` → read the drafts in
+   `reports/<program>/`, **reproduce by hand**, and submit yourself (**G3**).
 
-**5. Triage, analyze, draft** (no target traffic — these reason over what was
-collected; stage 4 triage/nuclei feeds `findings/shortlist.json`):
-```bash
-make rank    P=<program>     # 4b: cluster + rank (model, schema-validated)
-make analyze P=<program>     # 5:  exploitability + non-destructive repro outline
-make report  P=<program>     # 6:  draft per CONFIRMED candidate -> reports/, then STOP
-```
-Review the drafts in `reports/<program>/`. **Submitting is 100% manual, by you**
-(gate G3).
-
-> First, prove the whole flow offline: `make test` (unit tests) and
-> `make dry-run` (stages 0–6 on example.com, every network tool stubbed).
+Do not un-stub all stages at once. Stages are idempotent and use `anew`, so re-runs surface
+only newly-seen items.
 
 ---
 
@@ -65,57 +116,16 @@ Review the drafts in `reports/<program>/`. **Submitting is 100% manual, by you**
 |---|---|
 | `in_scope` | the "In scope" / "Targets" list. Wildcards (`*.example.com`) cover **strict subdomains only** — list the apex (`example.com`) separately unless you set `wildcard_includes_apex`. |
 | `out_of_scope` | the "Out of scope" / excluded-assets list. **These always win** over `in_scope`. |
-| `rate_limit_rps` | any stated request-rate ceiling ("no more than N req/s", "no aggressive scanning"). If unstated, leave the default **2** or go lower. |
-| `automation_allowed` | whether automated tooling is permitted at all. If the page forbids automation, set `false` — **the pipeline then refuses every active stage** for this program and tells you to work it manually. |
-| `active_testing_allowed` | whether sending requests to targets is allowed (vs. passive-only / report-from-public-data programs). Gates stages 2–3. |
-| `ai_disclosure_required` | whether submissions must disclose AI assistance. When `true`, every report draft carries the AI-assisted note. Many programs now require this. |
-| `wildcard_includes_apex` | **per-program opt-in.** Default (absent/false) is conservative: a wildcard does **not** include the bare apex. Set `true` only if this program's wording says it does — never a global default. |
-| `notes` | paste the relevant RoE text verbatim, so any reviewer can see exactly what was authorized. |
+| `rate_limit_rps` | any stated request-rate ceiling. If unstated, leave the default **2** or go lower. |
+| `automation_allowed` | whether automated tooling is permitted at all. `false` ⇒ the pipeline refuses every active stage and tells you to work it manually. |
+| `active_testing_allowed` | whether sending requests to targets is allowed (vs. passive-only). Gates stages 2–3. |
+| `ai_disclosure_required` | whether submissions must disclose AI assistance; when `true`, every draft carries the AI-assisted note. |
+| `wildcard_includes_apex` | **per-program opt-in.** Default (absent/false) is conservative: a wildcard does not include the bare apex. Set `true` only if the program's wording says so. |
+| `notes` | paste the relevant RoE text verbatim, so any reviewer sees exactly what was authorized. |
 
-Fail-closed defaults: if a flag is omitted, `automation_allowed` and
-`active_testing_allowed` default to **false**, `ai_disclosure_required` to
-**true**, and `rate_limit_rps` to **2**. An empty `in_scope` is refused.
-
----
-
-## The three gates (and why)
-
-1. **G1 — scope confirmation.** `make init` prints the parsed scope and stops so
-   you verify it *before* any network call. *Why:* scope mistakes (a stray
-   wildcard, a stale target) are how testing strays out of bounds — catch them
-   while it's still just a file.
-2. **G2 — typed active-testing confirmation.** Every stage that sends crafted
-   requests (httpx/katana/naabu, later nuclei) requires `active_testing_allowed:
-   true` **and** an explicit per-run "yes": it echoes the plan (program, in-scope
-   target count, `rate_limit_rps`) and you must type the exact program name at a
-   prompt read from `/dev/tty`. No env var, flag, or piped stdin can satisfy it;
-   anything but the exact name aborts with no traffic; it only triggers at
-   `BB_DRY_RUN=0`. *Why:* sending real traffic to someone else's systems is the
-   point of no return — it should take a deliberate, un-scriptable human act.
-3. **G3 — never submit.** The agent writes drafts to `reports/` and stops;
-   submission is manual. *Why:* a human must own every word of what gets filed,
-   and must confirm each finding is real, in-scope, and proven within policy.
-
-**No destructive or out-of-policy actions, ever:** no DoS/stress, no data
-exfiltration beyond minimal proof, no touching other users' data, no social
-engineering, account creation, or CAPTCHA solving. If proving a finding would
-require any of these, stage 5 flags it (`out_of_policy_to_prove`) and does not
-auto-confirm it — you handle it manually.
-
----
-
-## Safety controls
-
-- **`BB_DRY_RUN` (default `1`).** While set, every network tool is stubbed with a
-  fixture and nothing is contacted. A real run sets `BB_DRY_RUN=0` explicitly,
-  per program, after G1/G2.
-- **`BB_HALT=1` kill-switch.** `export BB_HALT=1` and every stage aborts (exit
-  42) at entry and between items. Unset to resume.
-- **Rate limiting + politeness.** Every active tool is capped at the program's
-  `rate_limit_rps`, with small jitter and an identifying User-Agent.
-- **Target data is never committed.** `recon/`, `findings/`, `reports/`, and
-  `logs/` are git-ignored (only `.gitkeep` is tracked), so enumerated hosts,
-  drafts, and logs for a real program stay local.
+Fail-closed defaults if a flag is omitted: `automation_allowed`/`active_testing_allowed` →
+**false**, `ai_disclosure_required` → **true**, `rate_limit_rps` → **2**. Empty `in_scope`
+is refused.
 
 ---
 
@@ -132,24 +142,13 @@ auto-confirm it — you handle it manually.
 | 5 analyze | `analyze` | local/Claude inference | — (reasons over findings) |
 | 6 report | `report` | none (deterministic render) | drafts only; **G3** |
 
-Stages 4b and 5 schema-validate their model output and retry once, with a
-deterministic fallback so a run never hard-fails offline. Stage 6 renders drafts
-deterministically from the reviewed stage-5 analysis (it adds no fresh prose of
-its own) for **confirmed** candidates only.
-
-**Inference:** deterministic work (stage 4a) is plain Python. Only 4b/5 use a
-model, chosen by `BB_INFERENCE_BACKEND` (default `claude`; `local`/`auto` use a
-local Ollama model via `bin/llm` but never auto-pull one). Claude cost per run is
+Stages 4b and 5 schema-validate their model output and retry once, with a deterministic
+fallback so a run never hard-fails offline. Stage 6 renders drafts deterministically from
+the reviewed stage-5 analysis (it adds no fresh prose of its own) for confirmed candidates
+only. Inference uses `BB_INFERENCE_BACKEND` (default `claude`); Claude cost per run is
 logged to `logs/cost.log`.
 
-## Layout
-
-```
-targets/<program>/scope.yaml   you write this, per program
-recon/<program>/               enumerated hosts, probes, endpoints (git-ignored)
-findings/                      stage-4a shortlist + 4b/5 JSON (git-ignored)
-reports/                       stage-6 drafts, for your review (git-ignored)
-logs/                          per-stage logs + cost.log (git-ignored)
-lib/                           scope_guard.py, munge.py, rank.py, analyze.py, report.py, common.sh
-bin/                           stage scripts, gate-check, llm
-```
+**No destructive or out-of-policy actions, ever:** no DoS/stress, no exfiltration beyond
+minimal proof, no touching other users' data, no social engineering, account creation, or
+CAPTCHA solving. If proving a finding would need any of these, stage 5 flags it and does not
+auto-confirm it — you handle it manually.
