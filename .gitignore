@@ -1,0 +1,9 @@
+# Never commit per-target recon data, findings, drafts, or logs.
+/recon/*
+/findings/*
+/reports/*
+/logs/*
+!*/.gitkeep
+__pycache__/
+*.pyc
+.venv/

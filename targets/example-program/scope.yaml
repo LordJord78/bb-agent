@@ -1,0 +1,44 @@
+# PLACEHOLDER scope for pipeline development only — not a real program.
+# Replace every value with text copied from a program you are enrolled in,
+# straight off its policy / rules-of-engagement page, before enabling it.
+#
+# See README (added when we wire the network stages) for how to read each
+# field off a program's policy page.
+
+program: example-program
+
+# Hosts the program authorizes. Wildcards match STRICT subdomains only —
+# "*.example.com" does NOT include the apex, so list the apex explicitly.
+in_scope:
+  - "*.example.com"
+  - "example.com"          # apex must be listed on its own
+  - "api.example.com"
+
+# Explicit denylist. These ALWAYS win over in_scope.
+out_of_scope:
+  - "blog.example.com"
+  - "*.internal.example.com"
+
+# Max requests/sec any active tool may send. Keep it at or below what the
+# program permits; default is a deliberately low 2 if a program is silent.
+rate_limit_rps: 2
+
+# From the program's rules of engagement. Defaults are fail-closed:
+# missing automation/active flags are treated as false (refuse).
+automation_allowed: true          # may the pipeline run tools at all?
+active_testing_allowed: false     # may tools send crafted requests? (G2)
+ai_disclosure_required: true      # must report drafts carry the AI note?
+
+# Only set this true if THIS program's RoE says a wildcard includes the apex.
+# Default (absent/false) is conservative: "*.example.com" excludes example.com.
+# wildcard_includes_apex: false
+
+notes: |
+  PLACEHOLDER rules of engagement. Paste the program's real RoE text here so
+  future reviewers can see exactly what was authorized, e.g.:
+    - allowed test windows / off-hours only?
+    - per-second or per-minute request ceilings
+    - whether automated scanning is permitted at all
+    - out-of-scope assets, data-handling limits, disclosure requirements
+  This example sets active_testing_allowed=false on purpose, so the default
+  dry-run exercises the passive-only path.

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Stage 0 — validate scope.yaml, run the Scope Guard, print parsed scope (gate G1).
+# No network. This is the print-back you confirm before anything touches a host.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+
+PROGRAM="${1:?usage: stage0-init <program>}"
+bb_check_halt init
+bb_log init "Validating scope for '$PROGRAM' (no network)."
+
+if ! "$BB_PY" "$BB_ROOT/lib/scope_guard.py" "$PROGRAM"; then
+  bb_log init "Scope file invalid — refusing to continue."
+  exit 1
+fi
+
+cat <<'BANNER'
+
+== GATE G1 (scope) ==========================================================
+The scope above is exactly what every stage will enforce. out_of_scope always
+wins; wildcards cover strict subdomains only. No network calls have been made.
+Proceed to the recon stages only if this is correct and current.
+=============================================================================
+BANNER
+bb_log init "Scope printed for G1. Stopping (human confirmation required)."

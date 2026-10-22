@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# bin/llm — thin inference dispatcher for the fuzzy stage (4b) and later stages.
+# Reads a prompt (arg or stdin), returns model text on stdout.
+#
+# Backend from BB_INFERENCE_BACKEND:
+#   claude (default) — invoke Claude Code headlessly, log total_cost_usd.
+#   local            — call a local model via Ollama (only if one is present;
+#                      this box does NOT auto-pull a model).
+#   auto             — try local, fall back to claude on timeout/failure.
+#
+# During dry-run (BB_DRY_RUN=1) no real backend is called: a deterministic stub
+# is returned so the pipeline can be exercised end-to-end without spend/network.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+
+PROMPT="${1:-}"
+[[ -z "$PROMPT" && ! -t 0 ]] && PROMPT="$(cat)"
+[[ -z "$PROMPT" ]] && { echo "usage: llm <prompt>  (or pipe via stdin)" >&2; exit 2; }
+
+LOCAL_MODEL="${BB_LOCAL_MODEL:-hermes3:3b}"
+LOCAL_TIMEOUT="${BB_LOCAL_TIMEOUT:-120}"
+
+if [[ "$BB_DRY_RUN" == "1" ]]; then
+  bb_log llm "DRY-RUN: returning stub (backend=$BB_INFERENCE_BACKEND, no call made)."
+  echo '{"stub":true,"note":"dry-run: no inference backend was called"}'
+  exit 0
+fi
+
+run_local() {
+  command -v ollama >/dev/null || return 3
+  ollama list 2>/dev/null | grep -q "^${LOCAL_MODEL%%:*}" || return 3
+  timeout "$LOCAL_TIMEOUT" ollama run "$LOCAL_MODEL" "$PROMPT"
+}
+
+run_claude() {
+  command -v claude >/dev/null || { bb_log llm "claude CLI not found"; return 4; }
+  local out
+  out="$(claude -p "$PROMPT" --output-format json 2>>"$BB_LOG_DIR/llm.log")" || return 5
+  # Record cost; emit the result text.
+  "$BB_PY" - "$out" <<'PY'
+import json, os, sys, datetime
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    print(sys.argv[1]); sys.exit(0)
+cost = data.get("total_cost_usd")
+if cost is not None:
+    log = os.path.join(os.environ["BB_LOG_DIR"], "cost.log")
+    with open(log, "a") as fh:
+        fh.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{cost}\n")
+print(data.get("result", data.get("text", "")))
+PY
+}
+
+case "$BB_INFERENCE_BACKEND" in
+  claude) run_claude ;;
+  local)  run_local || { bb_log llm "local backend unavailable"; exit 3; } ;;
+  auto)   run_local || { bb_log llm "local failed; falling back to claude"; run_claude; } ;;
+  *)      echo "unknown BB_INFERENCE_BACKEND: $BB_INFERENCE_BACKEND" >&2; exit 2 ;;
+esac

@@ -1,0 +1,10 @@
+{"template-id":"ssl-dns-names","info":{"severity":"info","name":"SSL DNS Names"},"host":"api.example.com","matched-at":"https://api.example.com:443"}
+{"template-id":"tls-version","info":{"severity":"info","name":"TLS Version"},"host":"api.example.com","matched-at":"https://api.example.com:443"}
+{"template-id":"apache-detect","info":{"severity":"medium","name":"Apache Detect"},"host":"www.example.com","matched-at":"https://www.example.com/"}
+{"template-id":"apache-detect","info":{"severity":"medium","name":"Apache Detect"},"host":"www.example.com","matched-at":"https://www.example.com"}
+{"template-id":"CVE-2021-41773","info":{"severity":"high","name":"Apache Path Traversal"},"host":"www.example.com","matched-at":"https://www.example.com/cgi-bin/"}
+{"template-id":"exposed-git","info":{"severity":"low","name":"Exposed .git"},"host":"shop.example.com","matched-at":"https://shop.example.com/.git/config"}
+{"template-id":"leaked-key","info":{"severity":"critical","name":"Leaked API Key"},"host":"blog.example.com","matched-at":"https://blog.example.com/app.js"}
+{"template-id":"http-missing-security-headers","info":{"severity":"info","name":"Missing Headers"},"host":"www.example.com","matched-at":"https://www.example.com"}
+this line is not json and must be skipped
+{"template-id":"open-redirect","info":{"severity":"medium","name":"Open Redirect"},"host":"evil-example.com","matched-at":"https://evil-example.com/r"}
