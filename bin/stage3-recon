@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Stage 3 — crawl (katana) + top-ports (naabu). Both are ACTIVE and rate
+# limited hard; the stage hard-refuses unless automation_allowed and
+# active_testing_allowed. Inputs re-filtered through the Scope Guard. Collects
+# endpoints/params and open ports for the triage stage. The per-run human "yes"
+# (G2) is the orchestrator's job.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=recon
+
+PROGRAM="${1:?usage: stage3-recon <program>}"
+bb_check_halt recon
+OUT="$BB_ROOT/recon/$PROGRAM"; mkdir -p "$OUT"
+RPS="$(bb_rate_limit_rps "$PROGRAM")"
+
+if [[ "$BB_DRY_RUN" != "1" ]]; then
+  bb_require_active_allowed "$PROGRAM" || {
+    bb_log recon "Refused by rules of engagement (active testing not allowed)."
+    exit 3
+  }
+fi
+
+alive="$OUT/alive.txt"
+hosts="$OUT/hosts.txt"
+[[ -s "$alive" ]] || { bb_log recon "No alive URLs yet; run stage 2 first."; exit 1; }
+
+# Crawl only in-scope alive URLs (URL-preserving filter), then keep only the
+# crawled endpoints whose host is in scope — full URLs, paths intact.
+scoped_urls="$OUT/alive.scoped"; bb_require_scope_pass_urls "$PROGRAM" < "$alive" > "$scoped_urls"
+bb_log recon "Crawling $(wc -l < "$scoped_urls" | tr -d ' ') URLs at <= $RPS rps (dry_run=$BB_DRY_RUN)."
+endpoints="$OUT/endpoints.txt"
+bb_dry_or "$BB_ROOT/tests/fixtures/katana-endpoints.txt" -- \
+  katana -silent -jc -rl "$RPS" -H "User-Agent: $BB_USER_AGENT" -list "$scoped_urls" \
+  | bb_require_scope_pass_urls "$PROGRAM" | bb_anew "$endpoints" >/dev/null || true
+
+# Top-ports on in-scope hosts, rate limited.
+scoped_hosts="$OUT/hosts.scoped"; bb_require_scope_pass "$PROGRAM" < "$hosts" > "$scoped_hosts"
+ports="$OUT/ports.txt"
+bb_dry_or "$BB_ROOT/tests/fixtures/naabu-ports.txt" -- \
+  naabu -silent -top-ports 100 -rate "$RPS" -list "$scoped_hosts" \
+  | bb_anew "$ports" >/dev/null || true
+
+bb_log recon "Endpoints: $(wc -l < "$endpoints" 2>/dev/null | tr -d ' ') · open ports: $(wc -l < "$ports" 2>/dev/null | tr -d ' ')."
+bb_log recon "Wrote $endpoints and $ports"
+echo "$endpoints"

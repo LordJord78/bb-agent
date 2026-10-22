@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Stage 2 — httpx probe (title/tech/status/CDN). This sends HTTP requests to
+# the target, so it is ACTIVE: it hard-refuses unless automation_allowed and
+# active_testing_allowed, and it honors rate_limit_rps. Inputs are re-filtered
+# through the Scope Guard first. The per-run human "yes" (G2) is the
+# orchestrator's job; this is the code-level half.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=probe
+
+PROGRAM="${1:?usage: stage2-probe <program>}"
+bb_check_halt probe
+OUT="$BB_ROOT/recon/$PROGRAM"; mkdir -p "$OUT"
+RPS="$(bb_rate_limit_rps "$PROGRAM")"
+
+# Active-traffic gate (code half of G2). Refuses on the example program.
+if [[ "$BB_DRY_RUN" != "1" ]]; then
+  bb_require_active_allowed "$PROGRAM" || {
+    bb_log probe "Refused by rules of engagement (active testing not allowed)."
+    exit 3
+  }
+fi
+
+hosts="$OUT/hosts.txt"
+[[ -s "$hosts" ]] || { bb_log probe "No in-scope hosts yet; run stage 1 first."; exit 1; }
+
+# Re-filter inputs through the Scope Guard (defense in depth) before any request.
+scoped="$OUT/hosts.scoped"; bb_require_scope_pass "$PROGRAM" < "$hosts" > "$scoped"
+bb_log probe "Probing $(wc -l < "$scoped" | tr -d ' ') in-scope hosts at <= $RPS rps (dry_run=$BB_DRY_RUN)."
+
+out="$OUT/probed.jsonl"
+bb_dry_or "$BB_ROOT/tests/fixtures/httpx.jsonl" -- \
+  httpx -silent -json -rl "$RPS" -H "User-Agent: $BB_USER_AGENT" \
+        -title -tech-detect -status-code -cdn -list "$scoped" > "$out"
+
+# Record alive URLs; surface newly-seen ones.
+alive="$(/usr/bin/python3 -c 'import sys,json
+for l in open(sys.argv[1]):
+    l=l.strip()
+    if not l: continue
+    try: o=json.loads(l)
+    except Exception: continue
+    if o.get("url"): print(o["url"])' "$out" | bb_anew "$OUT/alive.txt")"
+bb_log probe "Alive URLs: $(wc -l < "$OUT/alive.txt" | tr -d ' ') total; $(printf '%s' "$alive" | grep -c . || true) new."
+bb_log probe "Wrote $out and $OUT/alive.txt"
+echo "$out"

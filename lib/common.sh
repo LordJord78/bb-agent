@@ -70,16 +70,49 @@ bb_rate_limit_rps() { bb_scope_field "$1" rate_limit_rps; }
 # Filter a newline-delimited host list on stdin through the Scope Guard.
 # usage: some_source | bb_require_scope_pass <program>   > in_scope_hosts.txt
 # No tool should ever receive hosts that have not passed through here.
+# (Calls scope_guard.py --filter so stdin stays the piped host list.)
 bb_require_scope_pass() {
-  local program="$1"
-  "$BB_PY" - "$program" <<'PY'
+  "$BB_PY" "$BB_ROOT/lib/scope_guard.py" --filter "$1"
+}
+
+# Like bb_require_scope_pass but for URL lines: keeps each full URL whose host
+# is in scope (preserves scheme/path), instead of collapsing to the bare host.
+bb_require_scope_pass_urls() {
+  "$BB_PY" "$BB_ROOT/lib/scope_guard.py" --filter-urls "$1"
+}
+
+# bb_dry_or <fixture> -- <real command...>
+# Dry-run returns the fixture; a real run executes the command. The single
+# choke point that keeps network tools from firing during the build.
+bb_dry_or() {
+  local fixture="$1"; shift
+  [[ "${1:-}" == "--" ]] && shift
+  if [[ "$BB_DRY_RUN" == "1" ]]; then
+    bb_log "${BB_STAGE:-stage}" "[stub] ${*:-tool} -> fixture $(basename "$fixture")"
+    cat "$fixture"
+  else
+    "$@"
+  fi
+}
+
+# bb_anew <store_file>: append new unique stdin lines to store, echo the new
+# ones (a local-only diff; uses anew if installed, else a Python fallback).
+bb_anew() {
+  local store="$1"; touch "$store"
+  if command -v anew >/dev/null 2>&1; then anew "$store"; return; fi
+  "$BB_PY" - "$store" <<'PY'
 import sys
-sys.path.insert(0, __import__("os").environ["BB_ROOT"])
-from lib.scope_guard import load_scope, scope_filter
-scope = load_scope(sys.argv[1])
-hosts = [l.strip() for l in sys.stdin if l.strip()]
-for h in scope_filter(hosts, scope):
-    print(h)
+store = sys.argv[1]
+seen = set(open(store).read().split())
+new = []
+for line in sys.stdin:
+    l = line.strip()
+    if l and l not in seen:
+        seen.add(l); new.append(l)
+if new:
+    with open(store, "a") as f:
+        f.write("\n".join(new) + "\n")
+    print("\n".join(new))
 PY
 }
 

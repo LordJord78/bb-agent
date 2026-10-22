@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# gate-check <program> — report whether active testing is permitted by the
+# program's rules of engagement (the code half of gate G2). Touches nothing;
+# useful before enabling stages 2-3, and used by the dry-run to show the gate.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+
+PROGRAM="${1:?usage: gate-check <program>}"
+if err="$(bb_require_active_allowed "$PROGRAM" 2>&1)"; then
+  echo "    active testing ALLOWED for '$PROGRAM' (stages 2-3 may run after your G2 yes)"
+else
+  echo "    REFUSED (as expected): ${err#REFUSED: }"
+fi

@@ -1,0 +1,4 @@
+{"url":"https://www.example.com","host":"www.example.com","status_code":200,"title":"Example Home","tech":["Apache HTTP Server"],"cdn":false}
+{"url":"https://api.example.com","host":"api.example.com","status_code":401,"title":"","tech":["nginx"],"cdn":false}
+{"url":"https://shop.example.com","host":"shop.example.com","status_code":200,"title":"Shop","tech":["nginx","PHP"],"cdn":true}
+{"url":"https://dev.example.com","host":"dev.example.com","status_code":403,"title":"Forbidden","tech":["Apache HTTP Server"],"cdn":false}

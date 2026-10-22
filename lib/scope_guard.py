@@ -239,11 +239,41 @@ def format_scope(scope: dict) -> str:
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) != 2:
-        print("usage: python3 lib/scope_guard.py <program|path-to-scope.yaml>", file=sys.stderr)
+    args = sys.argv[1:]
+    # Filter modes (the single scope choke point for the stage scripts; stdin
+    # stays the piped data):
+    #   --filter       hosts in  -> normalized in-scope hosts out (deduped)
+    #   --filter-urls  URLs in   -> original line out when its host is in scope
+    #                              (preserves scheme/path; deduped, order kept)
+    if args[:1] in (["--filter"], ["--filter-urls"]):
+        if len(args) != 2:
+            print(f"usage: scope_guard.py {args[0]} <program>  (data on stdin)", file=sys.stderr)
+            raise SystemExit(2)
+        try:
+            scope = load_scope(args[1])
+        except ScopeError as exc:
+            print(f"scope error: {exc}", file=sys.stderr)
+            raise SystemExit(1)
+        if args[0] == "--filter":
+            hosts = [line.strip() for line in sys.stdin if line.strip()]
+            for host in scope_filter(hosts, scope):
+                print(host)
+        else:
+            seen: set[str] = set()
+            for line in sys.stdin:
+                s = line.strip()
+                if not s or s in seen:
+                    continue
+                if host_in_scope(normalize_host(s), scope):
+                    seen.add(s)
+                    print(s)
+        raise SystemExit(0)
+
+    if len(args) != 1:
+        print("usage: scope_guard.py <program|path>  |  scope_guard.py --filter <program>", file=sys.stderr)
         raise SystemExit(2)
     try:
-        parsed = load_scope(sys.argv[1])
+        parsed = load_scope(args[0])
     except ScopeError as exc:
         print(f"scope error: {exc}", file=sys.stderr)
         raise SystemExit(1)

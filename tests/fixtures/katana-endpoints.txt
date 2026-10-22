@@ -1,0 +1,4 @@
+https://www.example.com/login
+https://www.example.com/search?q=
+https://api.example.com/v1/users?id=
+https://shop.example.com/cart

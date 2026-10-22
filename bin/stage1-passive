@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Stage 1 — passive subdomain enumeration + resolve. NO active traffic to the
+# target: subfinder passive sources and crt.sh query third parties, and DNS
+# resolution hits resolvers, not the program's services. So this stage does
+# NOT need gate G2. Everything still passes through the Scope Guard before it
+# is written, and anew surfaces only newly-seen hosts.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=passive
+
+PROGRAM="${1:?usage: stage1-passive <program>}"
+bb_check_halt passive
+OUT="$BB_ROOT/recon/$PROGRAM"; mkdir -p "$OUT"
+bb_log passive "Passive enum for '$PROGRAM' (dry_run=$BB_DRY_RUN). No active traffic."
+
+# Enumeration seeds: strip a leading "*." from each in_scope entry.
+mapfile -t SEEDS < <(bb_scope_field "$PROGRAM" in_scope | tr ' ' '\n' | sed 's/^\*\.//' | sort -u)
+bb_log passive "Seeds: ${SEEDS[*]:-none}"
+
+raw="$OUT/subs.raw"; : > "$raw"
+if [[ "$BB_DRY_RUN" == "1" ]]; then
+  bb_dry_or "$BB_ROOT/tests/fixtures/passive-subs.txt" -- "subfinder+crt.sh" >> "$raw"
+else
+  for d in "${SEEDS[@]}"; do
+    bb_check_halt passive; bb_jitter
+    subfinder -silent -all -d "$d" >> "$raw" 2>>"$BB_LOG_DIR/passive.log" || true
+    curl -s -A "$BB_USER_AGENT" "https://crt.sh/?q=%25.$d&output=json" \
+      | "$BB_PY" -c 'import sys,json
+try: data=json.load(sys.stdin)
+except Exception: data=[]
+for o in data:
+    for n in str(o.get("name_value","")).splitlines():
+        print(n.strip().lstrip("*."))' >> "$raw" 2>/dev/null || true
+  done
+fi
+
+# Resolve, then run the Scope Guard: nothing out-of-scope is ever written.
+resolved="$OUT/resolved.txt"
+if [[ "$BB_DRY_RUN" == "1" ]]; then
+  sort -u "$raw" > "$resolved"                         # stub: assume resolvable
+else
+  sort -u "$raw" | dnsx -silent -a -resp-only > "$resolved" 2>>"$BB_LOG_DIR/passive.log" || true
+  # dnsx emits IPs with -resp-only; re-run for hostnames that resolve:
+  sort -u "$raw" | dnsx -silent > "$resolved" 2>>"$BB_LOG_DIR/passive.log" || true
+fi
+
+new="$(sort -u "$resolved" | bb_require_scope_pass "$PROGRAM" | bb_anew "$OUT/hosts.txt")"
+total="$(wc -l < "$OUT/hosts.txt" | tr -d ' ')"
+bb_log passive "In-scope hosts: $total total; $(printf '%s' "$new" | grep -c . || true) new this run."
+bb_log passive "Wrote $OUT/hosts.txt"
+echo "$OUT/hosts.txt"
