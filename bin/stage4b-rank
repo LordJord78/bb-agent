@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Stage 4b — fuzzy ranking of the 4a shortlist. No target traffic (it reasons
+# over already-collected findings). Uses bin/llm (BB_INFERENCE_BACKEND, default
+# claude). In dry-run, or if the model is unavailable / returns invalid JSON
+# after one retry, it falls back to a deterministic ranking so the run never
+# hard-fails and the output is always schema-valid.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=rank
+
+PROGRAM="${1:?usage: stage4b-rank <program>}"
+IN="${2:-$BB_ROOT/findings/shortlist.json}"
+bb_check_halt rank
+[[ -s "$IN" ]] || { bb_log rank "No 4a shortlist at $IN; run stage 4a (munge) first."; exit 1; }
+mkdir -p "$BB_ROOT/findings"
+OUT="$BB_ROOT/findings/ranked.json"
+
+bb_log rank "Ranking $IN (backend=$BB_INFERENCE_BACKEND, dry_run=$BB_DRY_RUN)."
+
+if [[ "$BB_DRY_RUN" == "1" ]]; then
+  bb_log rank "[dry-run] using deterministic fallback (no model call)."
+  "$BB_PY" "$BB_ROOT/lib/rank.py" --deterministic "$IN" > "$OUT"
+else
+  # Real path: prompt the model via bin/llm, validate + retry once in rank.py.
+  if "$BB_PY" "$BB_ROOT/lib/rank.py" --llm "$BB_ROOT/bin/llm" "$IN" > "$OUT" 2>>"$BB_LOG_DIR/rank.log"; then
+    bb_log rank "Model ranking written."
+  else
+    bb_log rank "Model ranking failed validation after retry — using deterministic fallback."
+    "$BB_PY" "$BB_ROOT/lib/rank.py" --deterministic "$IN" > "$OUT"
+  fi
+fi
+
+n="$("$BB_PY" -c "import json;print(len(json.load(open('$OUT'))['candidates']))")"
+src="$("$BB_PY" -c "import json;print(json.load(open('$OUT')).get('source','?'))")"
+bb_log rank "Wrote $OUT — $n candidate(s), source=$src."
+echo "$OUT"

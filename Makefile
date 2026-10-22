@@ -19,18 +19,21 @@ IN    ?= tests/fixtures/nuclei-sample.jsonl
 PY    ?= python3
 export BB_DRY_RUN ?= 1
 
-.PHONY: test init passive probe recon munge dry-run rank analyze report _todo
+.PHONY: test init passive probe recon munge rank dry-run analyze report _todo
 
 test:
 	@$(PY) tests/test_scope_guard.py
 	@echo
 	@$(PY) tests/test_munge.py
+	@echo
+	@$(PY) tests/test_rank.py
 
 init:    ; @bin/stage0-init $(P)
 passive: ; @bin/stage1-passive $(P)
 probe:   ; @bin/stage2-probe $(P)
 recon:   ; @bin/stage3-recon $(P)
 munge:   ; @$(PY) lib/munge.py --program $(P) $(IN)
+rank:    ; @bin/stage4b-rank $(P) findings/shortlist.json
 
 dry-run:
 	@echo "### DRY-RUN (BB_DRY_RUN=$(BB_DRY_RUN)) — no host is contacted ###"; echo
@@ -56,14 +59,15 @@ dry-run:
 	@$(PY) lib/munge.py --program $(P) $(IN) > findings/shortlist.example.json
 	@$(PY) -c "import json;d=json.load(open('findings/shortlist.example.json'));print('    counts:',json.dumps(d['counts']));print('    assets:',list(d['assets']))"
 	@echo
-	@echo "--- stage 4b: fuzzy rank (stubbed via bin/llm) ---"
-	@printf '    backend=%s  llm stub -> ' "$${BB_INFERENCE_BACKEND:-claude}"; bin/llm "rank" 2>/dev/null
+	@echo "--- stage 4b: fuzzy rank (deterministic fallback in dry-run) ---"
+	@bin/stage4b-rank $(P) findings/shortlist.example.json >/dev/null
+	@$(PY) -c "import json;d=json.load(open('findings/ranked.json'));print('    source:',d['source'],'· candidates:',len(d['candidates']));[print('      -',c['severity'],c['id'],'on',c['hosts']) for c in d['candidates']]"
 	@echo
 	@echo "--- stages 5-6: analyze / report ---"
 	@echo "    [stubbed] not wired yet. No report is ever submitted (G3)."
-	@echo; echo "### dry-run complete — stages 0-4a proven on example.com ###"
+	@echo; echo "### dry-run complete — stages 0-4b proven on example.com ###"
 
-rank analyze report: _todo
+analyze report: _todo
 _todo:
 	@echo "stage '$(MAKECMDGOALS)' is not wired yet — next reviewable step."
 	@echo "4b will schema-validate + retry via bin/llm; 5-6 draft reports with the"
