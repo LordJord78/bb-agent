@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "program": "example-program",
+  "source": "model",
+  "candidates": [
+    {
+      "id": "cve-2021-41773",
+      "title": "Apache path traversal (CVE-2021-41773)",
+      "hosts": ["www.example.com"],
+      "templates": ["CVE-2021-41773"],
+      "analysis": {
+        "exploitability": "Path traversal reachable on a live in-scope host via a crafted request to a CGI path.",
+        "in_scope": true,
+        "severity": "high",
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "reproduction_outline": [
+          "Confirm the server advertises the affected Apache build.",
+          "Issue a single benign traversal probe for a world-readable file to confirm reachability.",
+          "Stop at minimal proof; do not read sensitive files."
+        ],
+        "confirmed": true,
+        "needs_manual_proof": false,
+        "out_of_policy_to_prove": false,
+        "notes": "Minimal proof is sufficient and in policy. Do not escalate to RCE."
+      }
+    },
+    {
+      "id": "exposed-git",
+      "title": "Exposed .git directory",
+      "hosts": ["shop.example.com"],
+      "templates": ["exposed-git"],
+      "analysis": {
+        "exploitability": "A .git directory may be downloadable; proving full source recovery needs care.",
+        "in_scope": true,
+        "severity": "low",
+        "cvss_vector": "",
+        "reproduction_outline": ["Confirm /.git/config is reachable; stop there."],
+        "confirmed": false,
+        "needs_manual_proof": true,
+        "out_of_policy_to_prove": false,
+        "notes": "Not auto-confirmed; left for human review."
+      }
+    }
+  ]
+}

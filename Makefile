@@ -19,14 +19,10 @@ IN    ?= tests/fixtures/nuclei-sample.jsonl
 PY    ?= python3
 export BB_DRY_RUN ?= 1
 
-.PHONY: test init passive probe recon munge rank dry-run analyze report _todo
+.PHONY: test init passive probe recon munge rank analyze report dry-run
 
 test:
-	@$(PY) tests/test_scope_guard.py
-	@echo
-	@$(PY) tests/test_munge.py
-	@echo
-	@$(PY) tests/test_rank.py
+	@for t in scope_guard munge rank analyze report; do $(PY) tests/test_$$t.py || exit 1; echo; done
 
 init:    ; @bin/stage0-init $(P)
 passive: ; @bin/stage1-passive $(P)
@@ -34,6 +30,8 @@ probe:   ; @bin/stage2-probe $(P)
 recon:   ; @bin/stage3-recon $(P)
 munge:   ; @$(PY) lib/munge.py --program $(P) $(IN)
 rank:    ; @bin/stage4b-rank $(P) findings/shortlist.json
+analyze: ; @bin/stage5-analyze $(P) findings/ranked.json
+report:  ; @bin/stage6-report $(P) findings/analyzed.json
 
 dry-run:
 	@echo "### DRY-RUN (BB_DRY_RUN=$(BB_DRY_RUN)) — no host is contacted ###"; echo
@@ -63,13 +61,14 @@ dry-run:
 	@bin/stage4b-rank $(P) findings/shortlist.example.json >/dev/null
 	@$(PY) -c "import json;d=json.load(open('findings/ranked.json'));print('    source:',d['source'],'· candidates:',len(d['candidates']));[print('      -',c['severity'],c['id'],'on',c['hosts']) for c in d['candidates']]"
 	@echo
-	@echo "--- stages 5-6: analyze / report ---"
-	@echo "    [stubbed] not wired yet. No report is ever submitted (G3)."
-	@echo; echo "### dry-run complete — stages 0-4b proven on example.com ###"
-
-analyze report: _todo
-_todo:
-	@echo "stage '$(MAKECMDGOALS)' is not wired yet — next reviewable step."
-	@echo "4b will schema-validate + retry via bin/llm; 5-6 draft reports with the"
-	@echo "[HUMAN REVIEW REQUIRED] banner. Nothing is ever submitted (G3)."
-	@exit 2
+	@echo "--- stage 5: analyze (deterministic fallback) ---"
+	@bin/stage5-analyze $(P) findings/ranked.json >/dev/null
+	@$(PY) -c "import json;d=json.load(open('findings/analyzed.json'));print('    source:',d['source'],'· confirmed:',sum(1 for c in d['candidates'] if c['analysis']['confirmed']),'· flagged for manual:',sum(1 for c in d['candidates'] if c['analysis']['needs_manual_proof']))"
+	@echo
+	@echo "--- stage 6: report (confirmed only; G3 stop, never submits) ---"
+	@bin/stage6-report $(P) findings/analyzed.json >/dev/null 2>&1 || true
+	@echo "    live flow drafted $$(ls reports/$(P)/*.md 2>/dev/null | wc -l | tr -d ' ') report(s) (deterministic analysis confirms nothing)."
+	@echo "    sample draft from a confirmed fixture, to show the format:"
+	@$(PY) lib/report.py $(P) tests/fixtures/analyzed-confirmed.json >/dev/null
+	@echo "      -> reports/$(P)/cve-2021-41773.md"; sed -n '1,6p;$$p' reports/$(P)/cve-2021-41773.md | sed 's/^/        /'
+	@echo; echo "### dry-run complete — full pipeline (stages 0-6) proven on example.com ###"

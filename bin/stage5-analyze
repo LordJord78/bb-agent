@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Stage 5 — exploitability analysis. No target traffic (reasons over collected
+# findings). Uses bin/llm (default claude); dry-run or model failure falls back
+# to the deterministic analysis, which confirms nothing and flags for manual work.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=analyze
+
+PROGRAM="${1:?usage: stage5-analyze <program>}"
+IN="${2:-$BB_ROOT/findings/ranked.json}"
+bb_check_halt analyze
+[[ -s "$IN" ]] || { bb_log analyze "No ranked file at $IN; run stage 4b (rank) first."; exit 1; }
+mkdir -p "$BB_ROOT/findings"
+OUT="$BB_ROOT/findings/analyzed.json"
+
+bb_log analyze "Analyzing $IN (backend=$BB_INFERENCE_BACKEND, dry_run=$BB_DRY_RUN)."
+if [[ "$BB_DRY_RUN" == "1" ]]; then
+  bb_log analyze "[dry-run] deterministic fallback (no model, confirms nothing)."
+  "$BB_PY" "$BB_ROOT/lib/analyze.py" --deterministic "$IN" > "$OUT"
+else
+  if "$BB_PY" "$BB_ROOT/lib/analyze.py" --llm "$BB_ROOT/bin/llm" "$IN" > "$OUT" 2>>"$BB_LOG_DIR/analyze.log"; then
+    bb_log analyze "Model analysis written."
+  else
+    bb_log analyze "Model analysis failed validation after retry — using deterministic fallback."
+    "$BB_PY" "$BB_ROOT/lib/analyze.py" --deterministic "$IN" > "$OUT"
+  fi
+fi
+
+conf="$("$BB_PY" -c "import json;print(sum(1 for c in json.load(open('$OUT'))['candidates'] if c['analysis']['confirmed']))")"
+flag="$("$BB_PY" -c "import json;print(sum(1 for c in json.load(open('$OUT'))['candidates'] if c['analysis']['needs_manual_proof']))")"
+bb_log analyze "Wrote $OUT — confirmed=$conf, needs_manual_proof=$flag."
+echo "$OUT"

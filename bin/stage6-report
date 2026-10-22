@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Stage 6 — render report drafts for CONFIRMED candidates into reports/<program>/.
+# Deterministic rendering of the stage-5 analysis (no model call, no network).
+# Drafts carry the [HUMAN REVIEW REQUIRED] banner + AI-disclosure note. Then it
+# STOPS: submission is 100% manual (gate G3). The agent never submits anything.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
+export BB_STAGE=report
+
+PROGRAM="${1:?usage: stage6-report <program>}"
+IN="${2:-$BB_ROOT/findings/analyzed.json}"
+bb_check_halt report
+[[ -s "$IN" ]] || { bb_log report "No analyzed file at $IN; run stage 5 (analyze) first."; exit 1; }
+
+bb_log report "Drafting reports from $IN for confirmed candidates only."
+mapfile -t DRAFTS < <("$BB_PY" "$BB_ROOT/lib/report.py" "$PROGRAM" "$IN" 2>>"$BB_LOG_DIR/report.log")
+
+if ((${#DRAFTS[@]} == 0)); then
+  bb_log report "No confirmed candidates — nothing drafted. (Deterministic analysis confirms nothing; use a model to confirm.)"
+else
+  bb_log report "Wrote ${#DRAFTS[@]} draft(s):"
+  for d in "${DRAFTS[@]}"; do bb_log report "  $d"; done
+fi
+bb_log report "STOP — gate G3. Review the drafts; submission is manual. The agent submits nothing."
+printf '%s\n' "${DRAFTS[@]}"

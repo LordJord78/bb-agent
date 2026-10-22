@@ -75,10 +75,16 @@ stages are idempotent and use `anew`, so re-runs surface only newly-seen items.
 | 2 probe (httpx) | `probe` | active, rate-limited | G2 + `active_testing_allowed` |
 | 3 recon (katana+naabu) | `recon` | active, rate-limited | G2 + `active_testing_allowed` |
 | 4a munge | `munge` | none (pure code) | — |
-| 4b rank | `rank` | local/Claude inference | *(next build step)* |
-| 5 analyze / 6 report | `analyze`/`report` | Claude | drafts only; G3 |
+| 4b rank | `rank` | local/Claude inference | — (reasons over collected findings) |
+| 5 analyze | `analyze` | local/Claude inference | — (reasons over collected findings) |
+| 6 report | `report` | none (deterministic render) | drafts only; **G3** |
 
-Stages 4b, 5, and 6 are not wired yet — they are the next reviewable step.
+Stages 4b and 5 schema-validate their model output and retry once, with a
+deterministic fallback so a run never hard-fails offline. Stage 6 renders
+drafts deterministically from the reviewed stage-5 analysis (it adds no fresh
+prose of its own) for **confirmed** candidates only, each with the
+`[HUMAN REVIEW REQUIRED]` banner and — when the program requires it — the
+AI-disclosure note. It then stops: submission is manual (G3).
 
 ## Inference
 
